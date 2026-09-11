@@ -15,6 +15,7 @@ from .text.kling import KlingModel
 from .text.seedance import SeedanceModel
 from .camera.example_model import PreviewCameraModel
 from .action.example_model import PreviewActionModel
+from .action.h3world import H3WorldModel
 
 MODEL_REGISTRY: Dict[str, Type[BaseVideoModel]] = {
     "wan": WanModel,
@@ -22,6 +23,7 @@ MODEL_REGISTRY: Dict[str, Type[BaseVideoModel]] = {
     "seedance": SeedanceModel,
     "camera_preview": PreviewCameraModel,
     "action_preview": PreviewActionModel,
+    "h3world": H3WorldModel,
 }
 
 

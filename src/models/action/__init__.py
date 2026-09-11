@@ -20,6 +20,7 @@ from ..navigation import (
 )
 from .actions import CAM_VALUE, case_to_actions, navigation_to_keyboard_mouse
 from .example_model import ActionConditionedModel, PreviewActionModel
+from .h3world import H3WorldModel
 
 __all__ = [
     "action_to_navigation",
@@ -30,4 +31,5 @@ __all__ = [
     "navigation_to_keyboard_mouse",
     "ActionConditionedModel",
     "PreviewActionModel",
+    "H3WorldModel",
 ]
