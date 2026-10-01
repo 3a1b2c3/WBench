@@ -65,6 +65,7 @@ from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
+from scipy.spatial.transform import Rotation, Slerp
 
 from .example_model import CameraConditionedModel
 
@@ -105,17 +106,25 @@ def _poses_to_camera_npy(poses: Dict[str, Any], out_path: Path) -> int:
         src = extrinsics[min(real_i, len(extrinsics) - 1)]
         camera[frame_idx] = src
 
-    # Fill the remaining rows by linear interpolation between surrounding
-    # real rows -- never read as real camera state (see module docstring),
-    # only needs to pass load_camera's orthonormality/finiteness checks.
+    # Fill the remaining rows by interpolating between surrounding real rows
+    # -- never read as real camera state (see module docstring), but still
+    # has to pass load_camera's orthonormality check, so the rotation block
+    # is slerped (a linear blend of two rotation matrices is not itself a
+    # rotation matrix -- determinant drifts away from +1) while translation
+    # stays a plain lerp.
     real_frames = sorted(set(real_idx_to_frame))
     for lo, hi in zip(real_frames[:-1], real_frames[1:]):
         gap = hi - lo
         if gap <= 1:
             continue
+        rotations = Rotation.concatenate(
+            [Rotation.from_matrix(camera[lo, :, :3]), Rotation.from_matrix(camera[hi, :, :3])]
+        )
+        slerp = Slerp([0.0, 1.0], rotations)
         for f in range(lo + 1, hi):
             t = (f - lo) / gap
-            camera[f] = (1.0 - t) * camera[lo] + t * camera[hi]
+            camera[f, :, :3] = slerp([t]).as_matrix()[0]
+            camera[f, :, 3] = (1.0 - t) * camera[lo, :, 3] + t * camera[hi, :, 3]
     # Tail past the last real pose (final chunk's rows 33+ never assigned
     # when the dict runs short): hold the last real pose.
     for f in range(real_frames[-1] + 1, total_frames):
