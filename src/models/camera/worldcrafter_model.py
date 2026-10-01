@@ -237,7 +237,7 @@ class WorldCrafterModel(CameraConditionedModel):
                 "--model-type", self.model_type,
                 "--model-path", str(self.model_path),
                 "--mode", "i2v",
-                "--image-path", str(image),
+                "--image-path", str(Path(image).resolve()),
                 "--prompt", auto_prompt,
                 "--camera-path", str(camera_path),
                 "--output-path", str(out_path),
