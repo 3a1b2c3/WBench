@@ -163,7 +163,12 @@ def generate_orbit_trajectory(
         world_up = np.array([0.0, 1.0, 0.0])
         right = np.cross(forward, world_up)
         right = right / (np.linalg.norm(right) + 1e-8)
-        up = np.cross(right, forward)
+        # cross(forward, right), not cross(right, forward): the latter is
+        # algebraically guaranteed to make [right|up|forward] a left-handed
+        # basis (determinant -1) for any forward/right, not just a
+        # floating-point edge case -- WorldCrafter's load_camera rejects
+        # exactly that.
+        up = np.cross(forward, right)
 
         T = np.eye(4)
         T[:3, 0] = right
