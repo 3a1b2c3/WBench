@@ -210,7 +210,11 @@ class MatrixGame35Model(CameraConditionedModel):
             cmd = [
                 str(mg35_python), str(self.infer_script),
                 "--person", person,
-                "--image", str(image),
+                # Absolute: the subprocess runs with cwd=mg35_root (below), so a
+                # relative path from WBench's own root resolves against the
+                # Matrix-Game-3.5 checkout instead and infer.py reports
+                # "cannot read image data/images/case_N.jpg".
+                "--image", str(Path(image).resolve()),
                 "--camera", str(camera_path),
                 "--prompt", self.prompt,
                 "--num-blocks", str(num_blocks),
