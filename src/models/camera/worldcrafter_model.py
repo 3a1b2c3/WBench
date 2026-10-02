@@ -63,6 +63,9 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import atexit
+import json
+
 import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
@@ -207,7 +210,9 @@ class WorldCrafterModel(CameraConditionedModel):
         self.model_type = model_type
         self.seed = seed
         self.num_inference_steps = num_inference_steps
-        self.infer_script = self.wc_root / "inference.py"
+        self._server_script = self.wc_root / "serve_inference.py"
+        self._server_process: subprocess.Popen | None = None
+        atexit.register(self._close_server)
 
     def get_model_info(self) -> Dict[str, Any]:
         return {
@@ -218,11 +223,20 @@ class WorldCrafterModel(CameraConditionedModel):
             "model_type": self.model_type,
         }
 
-    def generate_with_poses(self, image: str, poses: Dict[str, Any],
-                            video_length: int, perspective: Optional[str] = None,
-                            **kwargs) -> List[np.ndarray]:
-        if not self.infer_script.exists():
-            raise RuntimeError(f"inference.py not found: {self.infer_script}")
+    def _ensure_server(self) -> None:
+        """Start the persistent inference server if it isn't already running.
+
+        Loading WorldCrafter's diffusion model and the Qwen3-VL caption
+        model (``inference.py``'s per-case cost -- the latter by design,
+        see ``caption.py``'s ``generate_caption``) once and reusing them for
+        every case in a batch is the whole point of ``serve_inference.py``;
+        reverting to a fresh subprocess per case would bring the reload cost
+        straight back.
+        """
+        if self._server_process is not None and self._server_process.poll() is None:
+            return
+        if not self._server_script.exists():
+            raise RuntimeError(f"serve_inference.py not found: {self._server_script}")
         if not self.model_path.exists():
             raise RuntimeError(
                 f"WorldCrafter weights not found: {self.model_path}. "
@@ -231,7 +245,55 @@ class WorldCrafterModel(CameraConditionedModel):
                 f"--local-dir {self.model_path}"
             )
         wc_python = _resolve_wc_python(self.wc_root, self._wc_python_override)
+        cmd = [
+            str(wc_python), str(self._server_script),
+            "--model-type", self.model_type,
+            "--model-path", str(self.model_path),
+            "--seed", str(self.seed),
+        ]
+        self._server_process = subprocess.Popen(
+            cmd, cwd=str(self.wc_root),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            text=True, bufsize=1,
+        )
+        # Skip blank/non-JSON noise rather than trusting the first line --
+        # stray output ahead of the real `{"ready": true}` print is a real
+        # failure mode (observed: a lone blank line), not hypothetical. True
+        # EOF (the process died before becoming ready) still fails loudly.
+        while True:
+            ready_line = self._server_process.stdout.readline()
+            if not ready_line:
+                self._close_server()
+                raise RuntimeError(
+                    "WorldCrafter inference server exited before becoming ready."
+                )
+            ready_line = ready_line.strip()
+            if not ready_line:
+                continue
+            try:
+                ready = json.loads(ready_line)
+            except json.JSONDecodeError:
+                continue
+            if ready.get("ready"):
+                break
 
+    def _close_server(self) -> None:
+        """Terminate the persistent inference server, releasing its GPU memory."""
+        process = self._server_process
+        self._server_process = None
+        if process is None:
+            return
+        try:
+            if process.stdin is not None:
+                process.stdin.close()
+            process.wait(timeout=30)
+        except Exception:
+            process.kill()
+
+    def generate_with_poses(self, image: str, poses: Dict[str, Any],
+                            video_length: int, perspective: Optional[str] = None,
+                            **kwargs) -> List[np.ndarray]:
+        self._ensure_server()
         auto_prompt = "auto-first-person" if perspective == "first_person" else "auto-third-person"
 
         with tempfile.TemporaryDirectory(prefix="worldcrafter_wbench_") as td:
@@ -241,28 +303,42 @@ class WorldCrafterModel(CameraConditionedModel):
             fov = _fov_from_fx(_WBENCH_REF_FX)
             out_path = td_path / "output.mp4"
 
-            cmd = [
-                str(wc_python), str(self.infer_script),
-                "--model-type", self.model_type,
-                "--model-path", str(self.model_path),
-                "--mode", "i2v",
-                "--image-path", str(Path(image).resolve()),
-                "--prompt", auto_prompt,
-                "--camera-path", str(camera_path),
-                "--output-path", str(out_path),
-                "--camera-x-fov", str(fov),
-                "--camera-xi", "0.0",
-                "--seed", str(self.seed),
-            ]
+            request = {
+                "mode": "i2v",
+                "image_path": str(Path(image).resolve()),
+                "prompt": auto_prompt,
+                "negative_prompt": None,
+                "camera_path": str(camera_path),
+                "output_path": str(out_path),
+                "camera_x_fov": fov,
+                "camera_xi": 0.0,
+                "seed": self.seed,
+            }
             if self.num_inference_steps is not None:
-                cmd += ["--num-inference-steps", str(self.num_inference_steps)]
+                request["num_inference_steps"] = self.num_inference_steps
 
-            result = subprocess.run(cmd, cwd=str(self.wc_root))
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"WorldCrafter inference.py failed (exit {result.returncode}): "
-                    f"{' '.join(cmd)}"
-                )
+            assert self._server_process is not None
+            assert self._server_process.stdin is not None
+            assert self._server_process.stdout is not None
+            self._server_process.stdin.write(json.dumps(request) + "\n")
+            self._server_process.stdin.flush()
+            # Same defensive read as _ensure_server(): skip blank/non-JSON
+            # noise rather than trusting the next line to be the response.
+            response = None
+            while response is None:
+                response_line = self._server_process.stdout.readline()
+                if not response_line:
+                    self._close_server()
+                    raise RuntimeError("WorldCrafter inference server exited unexpectedly.")
+                response_line = response_line.strip()
+                if not response_line:
+                    continue
+                try:
+                    response = json.loads(response_line)
+                except json.JSONDecodeError:
+                    continue
+            if not response.get("ok"):
+                raise RuntimeError(f"WorldCrafter inference server failed: {response.get('error')}")
 
             frames = _read_video_frames(out_path)
             return _reconcile_frame_count(frames, video_length)
