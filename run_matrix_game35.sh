@@ -15,6 +15,18 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
+# WBench has no pyproject.toml/uv.lock of its own, so `uv run` has nothing
+# to sync and just falls through to whatever's active on PATH -- different
+# every shell, missing a different dependency each time (cv2, scipy,
+# requests, all seen in practice). ~/wbench-venv is the known-good env;
+# used directly here so this script doesn't depend on which shell ran it.
+WBENCH_PYTHON="${WBENCH_PYTHON:-$HOME/wbench-venv/bin/python}"
+if [ ! -x "$WBENCH_PYTHON" ]; then
+    echo "WBENCH_PYTHON not found/executable: $WBENCH_PYTHON" >&2
+    echo "Set WBENCH_PYTHON to a venv with WBench's dependencies installed." >&2
+    exit 1
+fi
+
 EVALUATE=0
 GEN_ARGS=()
 for arg in "$@"; do
@@ -28,14 +40,14 @@ done
 echo "=========================================="
 echo "WBench: generating with matrix_game35"
 echo "=========================================="
-uv run python generate.py --model matrix_game35 "${GEN_ARGS[@]}"
+"$WBENCH_PYTHON" generate.py --model matrix_game35 "${GEN_ARGS[@]}"
 
 if [ "$EVALUATE" = "1" ]; then
     echo
     echo "=========================================="
     echo "WBench: evaluating matrix_game35"
     echo "=========================================="
-    uv run python main.py --model matrix_game35
+    "$WBENCH_PYTHON" main.py --model matrix_game35
 fi
 
 echo
