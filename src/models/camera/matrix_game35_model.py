@@ -4,6 +4,21 @@
     model = get_model("matrix_game35")
     model.generate_multi_turn(case, "work_dirs/matrix_game35/videos/case_1_combined.mp4", "data")
 
+Batched generation (avoiding per-case checkpoint reload)
+=========================================================
+generate_with_poses() spawns one infer.py subprocess per case, which
+reloads Matrix-Game-3.5's full checkpoint stack (DiT + Wan2.2-TI2V-5B +
+umt5-xxl + DA3NESTED) every time -- fine for a single case, expensive for
+a sweep. generate_batch_with_poses() instead builds a --batch-manifest
+(infer.py's own `build_batch_workspace()`/`--num_val_batches` support, not
+a new server) and loads the model once per person group. WBench's own
+generate.py loop calls generate_multi_turn/generate_with_poses once per
+case and isn't wired up to call the batch method -- a caller that wants
+the reload savings needs to collect its cases up front and call
+generate_batch_with_poses() directly instead of going through generate.py.
+UNTESTED end-to-end; see the method's own docstring for what to check
+first if it doesn't come back clean on a real run.
+
 Environment
 ===========
 Matrix-Game-3.5 needs its own venv (`.venv`, created by `setup_env.sh`, torch
@@ -61,6 +76,7 @@ quality).
 """
 from __future__ import annotations
 
+import json
 import math
 import subprocess
 import tempfile
@@ -238,3 +254,112 @@ class MatrixGame35Model(CameraConditionedModel):
             ) / run_name / "result.mp4"
             frames = _read_video_frames(result_path)
             return _reconcile_frame_count(frames, video_length)
+
+    def generate_batch_with_poses(
+        self, items: List[Dict[str, Any]], gpu_id: int = 0,
+    ) -> List[Optional[List[np.ndarray]]]:
+        """Batch counterpart of generate_with_poses: groups items by
+        resolved person (checkpoints differ by person, so a single infer.py
+        process can't mix them) and, within each group, calls infer.py
+        exactly once via --batch-manifest instead of once per item -- this
+        is what actually avoids the per-case checkpoint reload documented
+        at the top of this file (same subprocess-via-separate-venv pattern
+        as WorldCrafter/H3-World, but now loading the model once per group
+        instead of once per case).
+
+        Each item: {"image": str, "poses": dict, "video_length": int,
+        "perspective": Optional[str]}. Returns a list aligned with `items`;
+        an entry is None if that case's result.mp4 was missing after the
+        batch run (see infer.py's collect_outputs_batch "no result.mp4"
+        warning for why, e.g. a filename-matching mismatch -- this is the
+        first thing to check if this comes back empty on a real run).
+
+        UNTESTED end-to-end, same caveat as infer.py's --batch-manifest
+        path: verify against a real run before trusting the output.
+        """
+        if not self.infer_script.exists():
+            raise RuntimeError(f"infer.py not found: {self.infer_script}")
+        mg35_python = _resolve_mg35_python(self.mg35_root, self._mg35_python_override)
+
+        groups: Dict[str, List[int]] = {}
+        for i, item in enumerate(items):
+            perspective = item.get("perspective")
+            person = "first" if perspective == "first_person" else (
+                "third" if perspective == "third_person" else self.person
+            )
+            groups.setdefault(person, []).append(i)
+
+        results: List[Optional[List[np.ndarray]]] = [None] * len(items)
+
+        for person, indices in groups.items():
+            with tempfile.TemporaryDirectory(prefix="matrix_game35_wbench_batch_") as td:
+                td_path = Path(td)
+                manifest: List[Dict[str, Any]] = []
+                case_name_by_index: Dict[int, str] = {}
+                for j, idx in enumerate(indices):
+                    item = items[idx]
+                    case_name = f"case_{j:03d}"
+                    case_name_by_index[idx] = case_name
+                    camera_path = td_path / f"{case_name}_camera.npz"
+                    _poses_to_camera_npz(item["poses"], camera_path)
+                    manifest.append({
+                        "name": case_name,
+                        "person": person,
+                        # Absolute: subprocess runs with cwd=mg35_root (below).
+                        "image": str(Path(item["image"]).resolve()),
+                        "camera": str(camera_path),
+                        "prompt": self.prompt,
+                        "camera_convention": "c2w",
+                    })
+
+                manifest_path = td_path / "manifest.json"
+                manifest_path.write_text(
+                    json.dumps(manifest), encoding="utf-8")
+
+                # All items in a batch share one --num-blocks (infer.py's
+                # run_generation passes it as a single global CLI value --
+                # see build_batch_workspace's docstring). Use the max
+                # across the group so no item is starved of blocks; shorter
+                # items just get more blocks than strictly needed, trimmed
+                # back down below by _reconcile_frame_count.
+                num_blocks = 1
+                for idx in indices:
+                    n_raw = max(
+                        1,
+                        len(items[idx]["poses"]) * LATENT_STRIDE // FRAMES_PER_BLOCK
+                        + 1,
+                    )
+                    num_blocks = max(num_blocks, n_raw)
+
+                out_dir = td_path / "out"
+                cmd = [
+                    str(mg35_python), str(self.infer_script),
+                    "--person", person,
+                    "--batch-manifest", str(manifest_path),
+                    "--num-blocks", str(num_blocks),
+                    "--seed", str(self.seed),
+                    "--output", str(out_dir),
+                    "--name", "batch",
+                ]
+                if self.checkpoint is not None:
+                    cmd += ["--ckpt", str(self.checkpoint)]
+
+                result = subprocess.run(cmd, cwd=str(self.mg35_root))
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"Matrix-Game-3.5 infer.py --batch-manifest failed "
+                        f"(exit {result.returncode}): {' '.join(cmd)}")
+
+                person_dir = "first_person" if person == "first" else "third_person"
+                for idx in indices:
+                    case_name = case_name_by_index[idx]
+                    result_path = (
+                        out_dir / person_dir / "batch" / case_name / "result.mp4"
+                    )
+                    if not result_path.exists():
+                        continue
+                    frames = _read_video_frames(result_path)
+                    results[idx] = _reconcile_frame_count(
+                        frames, items[idx]["video_length"])
+
+        return results
