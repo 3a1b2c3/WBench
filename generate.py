@@ -13,8 +13,8 @@ Usage:
     # Limit number of cases
     python generate.py --model example --limit 10
 
-    # Resume (skip existing)
-    python generate.py --model example --resume
+    # Skip cases with existing videos (now the default); force regeneration
+    python generate.py --model example --force
 """
 import argparse
 import glob
@@ -57,7 +57,9 @@ def main():
     parser.add_argument("--output_dir", default=None, help="Output dir (default: work_dirs/<model>/videos)")
     parser.add_argument("--cases", nargs="*", help="Specific case JSON files to process")
     parser.add_argument("--limit", type=int, default=None, help="Max cases to process")
-    parser.add_argument("--resume", action="store_true", help="Skip cases with existing videos")
+    parser.add_argument(
+        "--force", action="store_true", help="Regenerate cases even if their video already exists"
+    )
     args = parser.parse_args()
 
     model = get_model(args.model)
@@ -86,7 +88,7 @@ def main():
         case_id = case["id"]
         out_path = os.path.join(output_dir, f"case_{case_id}_combined.mp4")
 
-        if args.resume and os.path.exists(out_path):
+        if not args.force and os.path.exists(out_path):
             logger.info(f"[{i+1}/{len(cases)}] case_{case_id}: SKIP (exists)")
             results["skipped"] += 1
             continue
