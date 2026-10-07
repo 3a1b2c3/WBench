@@ -170,6 +170,15 @@ class VLMClient:
 
     DEFAULT_API_URL = "https://ark.cn-beijing.volces.com/api/v3"
     DEFAULT_MODEL = "doubao-seed-2-0-lite-260215"
+    NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+    # llama-3.1-nemotron-nano-vl-8b-v1 was retired from NVIDIA's hosted catalog
+    # (confirmed: live calls return 410 Gone). nemotron-nano-12b-v2-vl is its
+    # successor on the same hosted endpoint, with native video_url support
+    # (docs.nvidia.com/nim/vision-language-models/1.5.0/examples/
+    # nemotron-nano-12b-v2-vl/api.html) -- UNVERIFIED against the live hosted
+    # API from this environment (no NVIDIA_API_KEY available here); confirm
+    # with a real call before trusting judge scores from it.
+    NVIDIA_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 
     def __init__(
         self,
@@ -178,15 +187,28 @@ class VLMClient:
         model_name: str = "",
         request_timeout: int = 300,
     ):
-        self.api_url = api_url or os.environ.get("VLM_API_URL", self.DEFAULT_API_URL)
-        self.api_key = api_key or os.environ.get("VLM_API_KEY", "")
-        self.model_name = model_name or os.environ.get("VLM_MODEL_NAME", self.DEFAULT_MODEL)
+        # NVIDIA mode: only NVIDIA_API_KEY is set, so default to NVIDIA's hosted endpoint/model.
+        use_nvidia = (not api_key and not os.environ.get("VLM_API_KEY")
+                      and bool(os.environ.get("NVIDIA_API_KEY")))
+        self.api_url = api_url or os.environ.get(
+            "VLM_API_URL", self.NVIDIA_API_URL if use_nvidia else self.DEFAULT_API_URL)
+        self.api_key = (api_key or os.environ.get("VLM_API_KEY", "")
+                        or os.environ.get("NVIDIA_API_KEY", ""))
+        self.model_name = model_name or os.environ.get(
+            "VLM_MODEL_NAME", self.NVIDIA_MODEL if use_nvidia else self.DEFAULT_MODEL)
         self.request_timeout = request_timeout
 
-        if self.model_name not in ALLOWED_MODELS:
-            raise ValueError(
-                f"Unsupported model: '{self.model_name}'. "
-                f"Allowed: {sorted(ALLOWED_MODELS)}"
+        self._is_doubao = self.model_name in ALLOWED_MODELS
+        if not self._is_doubao:
+            if not use_nvidia and os.environ.get("VLM_ALLOW_CUSTOM_MODEL") != "1":
+                raise ValueError(
+                    f"Unsupported model: '{self.model_name}'. "
+                    f"Allowed: {sorted(ALLOWED_MODELS)}. Set VLM_ALLOW_CUSTOM_MODEL=1 to use "
+                    f"another judge (scores are then not comparable to the leaderboard)."
+                )
+            logger.warning(
+                f"Using custom VLM judge '{self.model_name}': scores are not comparable "
+                f"to the leaderboard."
             )
 
         if not self.api_url:
@@ -195,7 +217,7 @@ class VLMClient:
             )
         if not self.api_key:
             raise RuntimeError(
-                "VLM API key not configured. Set VLM_API_KEY env var or pass api_key."
+                "VLM API key not configured. Set VLM_API_KEY (or NVIDIA_API_KEY) env var or pass api_key."
             )
 
         self._use_openai_format = "chat/completions" in self.api_url
@@ -299,8 +321,9 @@ class VLMClient:
             "messages": messages,
             "temperature": 0.1,
             "max_completion_tokens": max_tokens,
-            "thinking": {"type": "disabled"},
         }
+        if self._is_doubao:
+            payload["thinking"] = {"type": "disabled"}
 
         attempt = 0
         while attempt < max_retries:
