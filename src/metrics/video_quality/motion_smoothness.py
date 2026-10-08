@@ -61,7 +61,13 @@ class MotionSmoothnessMetric(BaseMetric):
                        if not (k == "amt" or k.startswith("amt."))
                        and _amt_prefix in (getattr(v, "__file__", "") or "")]:
                 del sys.modules[_k]
-        ckpt = torch.load(ckpt_path, map_location="cpu")
+        # PyTorch 2.6 made weights_only=True the torch.load() default; this
+        # checkpoint predates that safer serialization format and contains a
+        # typing.OrderedDict global the default allowlist rejects. The file
+        # comes from a fixed, hardcoded HuggingFace URL this same function
+        # already trusts enough to auto-download (line ~45 above), so
+        # weights_only=False here doesn't trust anything new.
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         state_dict = ckpt.get('state_dict', ckpt)
         model.load_state_dict({k.replace('module.', ''): v for k, v in state_dict.items()})
         return model.to(self.device).eval()
