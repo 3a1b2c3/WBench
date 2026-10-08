@@ -170,15 +170,21 @@ class VLMClient:
 
     DEFAULT_API_URL = "https://ark.cn-beijing.volces.com/api/v3"
     DEFAULT_MODEL = "doubao-seed-2-0-lite-260215"
-    NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-    # llama-3.1-nemotron-nano-vl-8b-v1 was retired from NVIDIA's hosted catalog
-    # (confirmed: live calls return 410 Gone). nemotron-nano-12b-v2-vl is its
-    # successor on the same hosted endpoint, with native video_url support
-    # (docs.nvidia.com/nim/vision-language-models/1.5.0/examples/
-    # nemotron-nano-12b-v2-vl/api.html) -- UNVERIFIED against the live hosted
-    # API from this environment (no NVIDIA_API_KEY available here); confirm
-    # with a real call before trusting judge scores from it.
-    NVIDIA_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
+    # integrate.api.nvidia.com's chat/completions path was returning a 500
+    # gateway error for every model (confirmed live, not specific to any one
+    # model) around the time this was last touched -- inference-api.nvidia.com
+    # is a separate, working NVIDIA-hosted gateway, confirmed live below.
+    NVIDIA_API_URL = "https://inference-api.nvidia.com/v1/chat/completions"
+    # Confirmed live with a real video_url call (200 OK, video actually
+    # ingested: prompt_tokens reflected real frame content). This is a
+    # reasoning model -- without enable_thinking=False (set below, same
+    # pattern as the existing Doubao `thinking: {type: disabled}` branch),
+    # it burns the entire max_tokens budget on chain-of-thought and returns
+    # content=null even at max_tokens=300, which crashes .strip() below and
+    # was the actual cause of every "VLM API failed after 6 retries" seen
+    # against the NVIDIA path. With enable_thinking=False: clean "yes"/"no",
+    # reasoning_tokens=0, ~3ms generation time.
+    NVIDIA_MODEL = "nvidia/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 
     def __init__(
         self,
@@ -267,13 +273,25 @@ class VLMClient:
         }
 
         attempt = 0
+        rate_limit_hits = 0
         while attempt < max_retries:
             try:
                 resp = requests.post(url, headers=headers, json=payload,
                                      timeout=self.request_timeout)
                 if resp.status_code == 429:
-                    wait = self.RATE_LIMIT_COOLDOWN
-                    logger.warning(f"Rate limited (429), cooling down {wait}s...")
+                    # See the identical fix + comment in _call_openai above --
+                    # same unbounded-retry bug (continue never incremented
+                    # attempt), fixed the same way here.
+                    rate_limit_hits += 1
+                    if rate_limit_hits > self.MAX_RATE_LIMIT_RETRIES:
+                        raise RuntimeError(
+                            f"Rate limited (429) {rate_limit_hits} times in a row -- "
+                            f"request rate likely exceeds the API's quota. Lower "
+                            f"concurrency (nproc) rather than retrying further."
+                        )
+                    wait = self.RATE_LIMIT_COOLDOWN * (2 ** (rate_limit_hits - 1))
+                    logger.warning(f"Rate limited (429), cooling down {wait}s "
+                                  f"(hit {rate_limit_hits}/{self.MAX_RATE_LIMIT_RETRIES})...")
                     time.sleep(wait)
                     continue
                 resp.raise_for_status()
@@ -324,15 +342,38 @@ class VLMClient:
         }
         if self._is_doubao:
             payload["thinking"] = {"type": "disabled"}
+        elif self.model_name == self.NVIDIA_MODEL:
+            # See NVIDIA_MODEL comment above: without this, the reasoning
+            # model burns max_tokens on chain-of-thought and returns
+            # content=null, which crashes .strip() below.
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         attempt = 0
+        rate_limit_hits = 0
         while attempt < max_retries:
             try:
                 resp = requests.post(self.api_url, headers=headers, json=payload,
                                      timeout=self.request_timeout)
                 if resp.status_code == 429:
-                    wait = self.RATE_LIMIT_COOLDOWN
-                    logger.warning(f"Rate limited (429), cooling down {wait}s...")
+                    # Was: fixed 2s cooldown + `continue` that never
+                    # incremented `attempt` -- an unbounded, non-backing-off
+                    # retry loop. Harmless against a transient blip, but a
+                    # genuine infinite loop if the request rate structurally
+                    # exceeds the account's quota (e.g. nproc=4 concurrent
+                    # workers against a ~40 req/min free-tier limit) --
+                    # confirmed: this is what was actually happening.
+                    # Exponential backoff + a real cap so it eventually
+                    # raises instead of spinning forever silently.
+                    rate_limit_hits += 1
+                    if rate_limit_hits > self.MAX_RATE_LIMIT_RETRIES:
+                        raise RuntimeError(
+                            f"Rate limited (429) {rate_limit_hits} times in a row -- "
+                            f"request rate likely exceeds the API's quota. Lower "
+                            f"concurrency (nproc) rather than retrying further."
+                        )
+                    wait = self.RATE_LIMIT_COOLDOWN * (2 ** (rate_limit_hits - 1))
+                    logger.warning(f"Rate limited (429), cooling down {wait}s "
+                                  f"(hit {rate_limit_hits}/{self.MAX_RATE_LIMIT_RETRIES})...")
                     time.sleep(wait)
                     continue
                 resp.raise_for_status()
@@ -352,6 +393,12 @@ class VLMClient:
     MAX_RETRIES = 6
     RETRY_BACKOFF = [3, 8, 15, 25, 40, 60]
     RATE_LIMIT_COOLDOWN = 2
+    # Exponential backoff from RATE_LIMIT_COOLDOWN: hits 1-8 -> 2,4,8,16,32,
+    # 64,128,256s (~8.5min cumulative) before giving up and raising -- long
+    # enough to ride out a transient quota blip, short enough to not spin
+    # forever against a structurally-too-low quota (e.g. nproc concurrency
+    # exceeding the account's requests/min limit).
+    MAX_RATE_LIMIT_RETRIES = 8
 
     def ask(self, prompt: str, images: List[Image.Image] = None, max_retries: int = 6,
             max_tokens: int = 300, system_prompt: str = None,
