@@ -16,6 +16,7 @@ from .text.seedance import SeedanceModel
 from .camera.example_model import PreviewCameraModel
 from .camera.worldcrafter_model import WorldCrafterModel
 from .camera.matrix_game35_model import MatrixGame35Model
+from .camera.h3_model import H3Model
 from .action.example_model import PreviewActionModel
 from .action.h3world import H3WorldModel
 
@@ -26,6 +27,7 @@ MODEL_REGISTRY: Dict[str, Type[BaseVideoModel]] = {
     "camera_preview": PreviewCameraModel,
     "worldcrafter": WorldCrafterModel,
     "matrix_game35": MatrixGame35Model,
+    "h3": H3Model,
     "action_preview": PreviewActionModel,
     "h3world": H3WorldModel,
 }
