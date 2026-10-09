@@ -294,6 +294,14 @@ class VLMClient:
                                   f"(hit {rate_limit_hits}/{self.MAX_RATE_LIMIT_RETRIES})...")
                     time.sleep(wait)
                     continue
+                if 400 <= resp.status_code < 500:
+                    # See the identical fix + comment in _call_openai above --
+                    # a 4xx means the payload itself was rejected, so retrying
+                    # it unchanged can't help. Log the body (never surfaced
+                    # before) and fail fast instead of burning ~150s retrying.
+                    logger.error(f"VLM API {resp.status_code} (not retrying, payload rejected): "
+                                f"{resp.text[:2000]}")
+                    resp.raise_for_status()
                 resp.raise_for_status()
                 _increment_request_count()
                 data = resp.json()
@@ -304,6 +312,15 @@ class VLMClient:
                                 text = part["text"].strip()
                                 return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
                 return ""
+            except requests.HTTPError as e:
+                if e.response is not None and 400 <= e.response.status_code < 500:
+                    raise
+                attempt += 1
+                if attempt < max_retries:
+                    wait = self.RETRY_BACKOFF[min(attempt - 1, len(self.RETRY_BACKOFF) - 1)]
+                    time.sleep(wait)
+                else:
+                    raise
             except Exception as e:
                 attempt += 1
                 if attempt < max_retries:
@@ -376,10 +393,30 @@ class VLMClient:
                                   f"(hit {rate_limit_hits}/{self.MAX_RATE_LIMIT_RETRIES})...")
                     time.sleep(wait)
                     continue
+                if 400 <= resp.status_code < 500:
+                    # A 4xx means the server rejected this exact payload --
+                    # retrying it unchanged (the old behavior, via the
+                    # generic except-and-retry below) can never succeed and
+                    # just burns ~150s of backoff per case. Log the response
+                    # body (never surfaced before -- raise_for_status()'s
+                    # message is just "400 Client Error: Bad Request for
+                    # url: ...", no detail) and fail fast instead.
+                    logger.error(f"VLM API {resp.status_code} (not retrying, payload rejected): "
+                                f"{resp.text[:2000]}")
+                    resp.raise_for_status()
                 resp.raise_for_status()
                 _increment_request_count()
                 text = resp.json()["choices"][0]["message"]["content"].strip()
                 return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            except requests.HTTPError as e:
+                if e.response is not None and 400 <= e.response.status_code < 500:
+                    raise
+                attempt += 1
+                if attempt < max_retries:
+                    wait = self.RETRY_BACKOFF[min(attempt - 1, len(self.RETRY_BACKOFF) - 1)]
+                    time.sleep(wait)
+                else:
+                    raise
             except Exception as e:
                 attempt += 1
                 if attempt < max_retries:
