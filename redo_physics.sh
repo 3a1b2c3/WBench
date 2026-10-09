@@ -10,6 +10,7 @@
 #
 #   ./redo_physics.sh matrix_game35
 #   ./redo_physics.sh matrix_game35 worldcrafter
+#   VLM_WORKERS=2 ./redo_physics.sh matrix_game35   # lower concurrency if 429s pile up
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,11 +28,18 @@ if [ "$#" -eq 0 ]; then
     exit 1
 fi
 
+# Each case already makes its causal_fidelity VLM calls serially (nproc=1 in
+# evaluate_case, see causal_fidelity.py), so vlm_workers == concurrent API
+# requests. 8 was saturating the endpoint's rate limit (seen: backoff
+# climbing to hit 7/8, 8/8 before giving up on a case) -- 3 keeps a few
+# cases in flight without tripping it every round.
+VLM_WORKERS="${VLM_WORKERS:-3}"
+
 for MODEL in "$@"; do
     echo "=========================================="
     echo "WBench: re-running causal_fidelity for $MODEL"
     echo "=========================================="
-    "$WBENCH_PYTHON" main.py --model "$MODEL" --phase vlm --metrics causal_fidelity --vlm_workers 8
+    "$WBENCH_PYTHON" main.py --model "$MODEL" --phase vlm --metrics causal_fidelity --vlm_workers "$VLM_WORKERS"
 
     echo
     echo "=========================================="

@@ -673,29 +673,42 @@ def _vlm_eval_case(task):
         except Exception:
             return False
 
+    # Tracks whether each metric *attempted* this call ended up with a valid
+    # score -- _vlm_eval_case itself almost never raises (every call below is
+    # try/except'd internally), so the old "done"/"fail" count in
+    # run_phase_vlm was always ~100% "ok" even when every VLM call was
+    # actually 400/429-ing and silently writing score: None.
+    attempted = {}
+
     if metrics_filter is None or "scene_adherence" in metrics_filter:
         if "scene_adherence" in case_data and not _has_valid_score("scene_adherence"):
             try:
                 result = evaluate_scene_adherence(video_path, case_data, "cpu")
                 _save_metric("scene_adherence", result)
+                attempted["scene_adherence"] = result.get("score") is not None
             except Exception as e:
                 _save_metric("scene_adherence", {"score": None, "error": str(e)})
+                attempted["scene_adherence"] = False
 
     if metrics_filter is None or "subject_adherence" in metrics_filter:
         if "subject_adherence" in case_data and not _has_valid_score("subject_adherence"):
             try:
                 result = evaluate_subject_adherence(video_path, case_data, "cpu")
                 _save_metric("subject_adherence", result)
+                attempted["subject_adherence"] = result.get("score") is not None
             except Exception as e:
                 _save_metric("subject_adherence", {"score": None, "error": str(e)})
+                attempted["subject_adherence"] = False
 
     if metrics_filter is None or "causal_fidelity" in metrics_filter:
         if "causal_fidelity" in case_data and not _has_valid_score("causal_fidelity"):
             try:
                 result = evaluate_causal_fidelity(video_path, case_data, "cpu")
                 _save_metric("causal_fidelity", result)
+                attempted["causal_fidelity"] = result.get("score") is not None
             except Exception as e:
                 _save_metric("causal_fidelity", {"score": None, "error": str(e)})
+                attempted["causal_fidelity"] = False
 
     from src.metrics.interaction.vlm_interaction import (
         evaluate_event_edit, evaluate_subject_action, evaluate_perspective_switch,
@@ -717,26 +730,32 @@ def _vlm_eval_case(task):
             try:
                 result = evaluate_event_edit(_get_vlm_client(), video_path, case_data)
                 _save_metric("event_edit_adherence", result)
+                attempted["event_edit_adherence"] = result.get("score") is not None
             except Exception as e:
                 _save_metric("event_edit_adherence", {"score": None, "error": str(e)})
+                attempted["event_edit_adherence"] = False
 
     if metrics_filter is None or "subject_action_adherence" in metrics_filter:
         if "subject_action" in itypes and not _has_valid_score("subject_action_adherence"):
             try:
                 result = evaluate_subject_action(_get_vlm_client(), video_path, case_data)
                 _save_metric("subject_action_adherence", result)
+                attempted["subject_action_adherence"] = result.get("score") is not None
             except Exception as e:
                 _save_metric("subject_action_adherence", {"score": None, "error": str(e)})
+                attempted["subject_action_adherence"] = False
 
     if metrics_filter is None or "perspective_switch_adherence" in metrics_filter:
         if "perspective_switch" in itypes and not _has_valid_score("perspective_switch_adherence"):
             try:
                 result = evaluate_perspective_switch(_get_vlm_client(), video_path, case_data)
                 _save_metric("perspective_switch_adherence", result)
+                attempted["perspective_switch_adherence"] = result.get("score") is not None
             except Exception as e:
                 _save_metric("perspective_switch_adherence", {"score": None, "error": str(e)})
+                attempted["perspective_switch_adherence"] = False
 
-    return case_id, "ok"
+    return case_id, "ok", attempted
 
 
 def run_phase_vlm(model, video_dir, vlm_workers=8, metrics=None):
@@ -831,19 +850,23 @@ def run_phase_vlm(model, video_dir, vlm_workers=8, metrics=None):
 
     t0 = time.time()
     done, fail = 0, 0
+    scored, no_score = 0, 0
     with ThreadPoolExecutor(max_workers=vlm_workers) as executor:
         futures = {executor.submit(_vlm_eval_case, t): t[0] for t in tasks}
         for future in as_completed(futures):
             try:
-                cid, status = future.result()
+                cid, status, attempted = future.result()
                 done += 1
+                scored += sum(1 for ok in attempted.values() if ok)
+                no_score += sum(1 for ok in attempted.values() if not ok)
             except Exception as e:
                 fail += 1
-            if (done + fail) % 1 == 0:
-                print(f"  [VLM] Progress: {done+fail}/{len(tasks)}", flush=True)
+            print(f"  [VLM] Progress: {done+fail}/{len(tasks)} "
+                 f"(scored={scored}, no_score={no_score})", flush=True)
 
     elapsed = time.time() - t0
-    print(f"\n  VLM done: {done} ok, {fail} fail in {elapsed:.0f}s ({elapsed/60:.1f}min)")
+    print(f"\n  VLM done: {done} ok, {fail} fail in {elapsed:.0f}s ({elapsed/60:.1f}min) "
+         f"| metrics: {scored} scored, {no_score} no-score")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
