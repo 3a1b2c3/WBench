@@ -66,6 +66,18 @@ def setup_env(device=None):
         env["CUDA_VISIBLE_DEVICES"] = str(device)
     env["PYTHONPATH"] = f"{MEGASAM_ROOT / 'UniDepth'}:{env.get('PYTHONPATH', '')}"
 
+    # Depth-Anything/run_videos.py's --localhub DINOv2 (vendored at
+    # weights/torch_hub/facebookresearch_dinov2_main/dinov2/layers/attention.py,
+    # yet another independent copy of the same DINOv2 attention code from
+    # UniDepth's own metadinov2/attention.py) defaults to xformers'
+    # memory_efficient_attention, whose precompiled kernels (cutlassF, fa2F)
+    # don't support Blackwell (compute capability (10, 3) -- "too new") or
+    # fp32 input. That file already has an XFORMERS_DISABLED escape hatch
+    # (same pattern used for MIND/ViPE's moge2/dinov2 copy) that falls back
+    # to the base Attention.forward(), which uses torch's native SDPA --
+    # Blackwell-safe, no dtype restriction. Just never set here before.
+    env["XFORMERS_DISABLED"] = "1"
+
     torch_home = Path(WEIGHTS_DIR)
     hub_dir = torch_home / "hub"
     hub_dir.mkdir(parents=True, exist_ok=True)
