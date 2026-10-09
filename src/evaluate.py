@@ -262,7 +262,18 @@ def evaluate_causal_fidelity(video_path: str, case_data: dict,
 
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     step = max(1, round(fps / 3.0))
+    # NVIDIA's hosted VLM endpoint rejects >32 images in one prompt (confirmed
+    # via its own error body: "At most 32 image(s) may be provided in one
+    # prompt."). Plain 3fps over the whole clip exceeds that for anything
+    # longer than ~10-11s, which was causing causal_fidelity to 400 on every
+    # call for those cases. Widen the stride so at most MAX_FRAMES are kept,
+    # still evenly spaced across the full video.
+    MAX_FRAMES = 32
+    if total > 0:
+        min_step = -(-total // MAX_FRAMES)  # ceil division
+        step = max(step, min_step)
     frames = []
     fid = 0
     while True:
