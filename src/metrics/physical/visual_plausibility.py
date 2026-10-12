@@ -214,6 +214,7 @@ def score_video_api(video_path: str, endpoint: str = None) -> Dict[str, Any]:
 def compute_case(video_path: str, model_path: str = None,
                  endpoint: str = None, device: str = "cuda") -> Dict[str, Any]:
     """Evaluate physical plausibility. Tries local model first, falls back to API."""
+    import sys
     model_path = model_path or os.environ.get("PAVRM_MODEL_PATH", "")
     if not model_path:
         _default = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
@@ -222,12 +223,19 @@ def compute_case(video_path: str, model_path: str = None,
             model_path = _default
     endpoint = endpoint or os.environ.get("PAVRM_API_URL", "")
 
+    print(f"[COMPUTE_CASE] model_path={model_path}", file=sys.stderr)
+    print(f"[COMPUTE_CASE] model_path exists={os.path.isdir(model_path) if model_path else False}", file=sys.stderr)
+    print(f"[COMPUTE_CASE] endpoint={endpoint}", file=sys.stderr)
+
     if model_path and os.path.isdir(model_path):
+        print(f"[COMPUTE_CASE] Using LOCAL MODEL", file=sys.stderr)
         evaluator = PhysicalPlausibilityEvaluator(model_path=model_path, device=device)
         result = evaluator.score_video(video_path)
     elif endpoint:
+        print(f"[COMPUTE_CASE] Using API ENDPOINT", file=sys.stderr)
         result = score_video_api(video_path, endpoint)
     else:
+        print(f"[COMPUTE_CASE] NO MODEL OR ENDPOINT", file=sys.stderr)
         return {"score": None, "error": "Neither PAVRM_MODEL_PATH nor PAVRM_API_URL is set"}
 
     # Fail if scoring returned no result
