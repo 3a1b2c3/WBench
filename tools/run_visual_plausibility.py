@@ -70,11 +70,7 @@ def main():
         case_id = fname.replace("case_", "").replace("_combined.mp4", "")
 
         t0 = time.time()
-        try:
-            result = evaluator.score_video(vp, fps=args.fps)
-        except Exception as e:
-            result = {"score": None, "raw_score": None, "error": str(e)}
-            print(f"[ERROR] {case_id}: {e}", file=sys.stderr)
+        result = evaluator.score_video(vp, fps=args.fps)
         elapsed = time.time() - t0
 
         # Save per-case result
@@ -92,14 +88,15 @@ def main():
 
         if result["score"] is not None:
             scores.append(result["score"])
+            score_str = f"{result['raw_score']:.3f}"
         else:
             errors += 1
+            score_str = f"ERR: {result['error'][:50]}" if result["error"] else "ERR"
 
         # Progress
         total_elapsed = time.time() - start_time
         avg_per_video = total_elapsed / (i + 1)
         eta = avg_per_video * (len(videos) - i - 1)
-        score_str = f"{result['raw_score']:.3f}" if result["raw_score"] else "ERR"
         print(
             f"[{i+1}/{len(videos)}] case_{case_id}: {score_str} "
             f"({elapsed:.1f}s) | avg={avg_per_video:.1f}s/video | ETA={eta:.0f}s",
