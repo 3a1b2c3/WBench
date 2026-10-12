@@ -129,11 +129,17 @@ def score_video_api(video_path: str, endpoint: str = None) -> Dict[str, Any]:
     """Score a video via NVIDIA inference API endpoint."""
     import requests
     import base64
+    import sys
+
+    print(f"[DEBUG] score_video_api called with video_path={video_path}", file=sys.stderr)
 
     api_key = os.environ.get("NVIDIA_API_KEY", "")
+    print(f"[DEBUG] NVIDIA_API_KEY present: {bool(api_key)}", file=sys.stderr)
+
     if not api_key:
-        return {"raw_score": None, "score": None,
-                "error": "NVIDIA_API_KEY not set. Set env var for NVIDIA inference API."}
+        err = "NVIDIA_API_KEY not set. Set env var for NVIDIA inference API."
+        print(f"[DEBUG] {err}", file=sys.stderr)
+        return {"raw_score": None, "score": None, "error": err}
 
     if not os.path.exists(video_path):
         return {"raw_score": None, "score": None, "error": f"Video not found: {video_path}"}
