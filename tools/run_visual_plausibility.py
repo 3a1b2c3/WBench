@@ -70,7 +70,11 @@ def main():
         case_id = fname.replace("case_", "").replace("_combined.mp4", "")
 
         t0 = time.time()
-        result = evaluator.score_video(vp, fps=args.fps)
+        try:
+            result = evaluator.score_video(vp, fps=args.fps)
+        except Exception as e:
+            result = {"score": None, "raw_score": None, "error": str(e)}
+            print(f"[ERROR] {case_id}: {e}", file=sys.stderr)
         elapsed = time.time() - t0
 
         # Save per-case result
