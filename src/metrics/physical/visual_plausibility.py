@@ -224,6 +224,10 @@ def compute_case(video_path: str, model_path: str = None,
     else:
         return {"score": None, "error": "Neither PAVRM_MODEL_PATH nor PAVRM_API_URL is set"}
 
+    # Fail if scoring returned no result
+    if result["score"] is None and result["error"] is None:
+        return {"score": None, "error": "Scoring produced no result (score and error both None)"}
+
     return {
         "score": result["score"],
         "details": {"raw_score": result["raw_score"]},
