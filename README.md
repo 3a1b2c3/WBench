@@ -100,6 +100,66 @@
 
 [View the live leaderboard on the WBench homepage →](https://meituan-longcat.github.io/WBench/#leaderboard)
 
+<!-- capabilities:start -->
+
+**Model capabilities** (reviewed 2026-10-12). Labels apply to the listed variant and published system configuration. They do not change scores or ranks.
+
+- **Realtime — Yes:** documented realtime or near-realtime streaming / interaction under the stated control interface. **No:** documented offline-only or slower-than-realtime configuration. Hardware and latency details are retained in the evidence registry.
+- **Audio — Yes:** jointly generated audio-video or viewpoint-following spatial sound. **No:** documented video-only generation. Input audio, added soundtracks and silent evaluation files do not establish this capability.
+- **Unknown:** evidence is missing or cannot be matched to the evaluated variant; it does **not** mean No. WBench does not currently score latency or audio quality.
+
+| Model | Variant | Type | Realtime | Audio | Evidence |
+|:---|:---|:---|:---:|:---:|:---|
+| Alaya-EVOKE-Turbo | 3-step | camera | Yes | Unknown | [Source 1](https://github.com/AlayaLab/Evoke) |
+| XGEN-Jing | bidirection | camera | Unknown | Unknown | [Source 1](https://github.com/XGEN-Labs/XGEN-JING/) |
+| Enuma | bidirection | camera | Unknown | Unknown | Pending confirmation |
+| VWA-World | — | action | Unknown | Unknown | Pending confirmation |
+| JoyAI-Echo-1.5 (WM) | bidirection | action | Unknown | Yes | [Source 1](https://github.com/jd-opensource/JoyAI-Echo/blob/main/echo_wm/README.md) |
+| gd_world | — | camera | Unknown | Unknown | Pending confirmation |
+| JoyAI-Echo-1.5 (WM) | flash, 4-step | action | Unknown | Yes | [Source 1](https://github.com/jd-opensource/JoyAI-Echo/blob/main/echo_wm/README_CAUSAL.md) · [Source 2](https://github.com/jd-opensource/JoyAI-Echo/blob/main/echo_wm/README.md) |
+| Zing-0.5 | <span class="model-type-tag model-type-action">action, 4-step, 5B | action | Yes | Unknown | [Source 1](https://github.com/seedleap/zing-world-model) |
+| XGEN-Jing | 4-step AR | camera | Unknown | Unknown | [Source 1](https://github.com/XGEN-Labs/XGEN-JING/) |
+| HiDream-O1-World | — | camera | Unknown | Unknown | Pending confirmation |
+| Alaya-EVOKE | 3-step | camera | Yes | Unknown | [Source 1](https://github.com/AlayaLab/Evoke) |
+| HelixWorld | 4-step, AR | camera | Yes | Yes | [Source 1](https://arxiv.org/abs/2609.38123) · [Source 2](https://github.com/NoizAI/HelixWorld) |
+| Enuma | AR, 4-step, flash | camera | Unknown | Unknown | Pending confirmation |
+| LingBot-World v2 | fast | camera | Yes | Unknown | [Source 1](https://github.com/Robbyant/lingbot-world-v2) |
+| Kling 3.0 | — | text | Unknown | Unknown | Pending confirmation |
+| LingBot-World | base-camera | camera | Unknown | Unknown | Pending confirmation |
+| HY-World 1.5 | ar-distill | camera | Yes | Unknown | [Source 1](https://github.com/Tencent-Hunyuan/HY-WorldPlay) |
+| Wan 2.7 | — | text | Unknown | Unknown | Pending confirmation |
+| HY-Video 1.5 | — | text | Unknown | Unknown | Pending confirmation |
+| LingBot-World | fast | camera | Yes | Unknown | [Source 1](https://github.com/robbyant/lingbot-world) |
+| Happy Oyster | — | action | Unknown | Unknown | Pending confirmation |
+| Lyra 2.0 | 4-step AR | camera | Unknown | Unknown | Pending confirmation |
+| AlayaWorld | — | camera | Unknown | Unknown | Pending confirmation |
+| Seedance 1.5 | — | text | Unknown | Yes | [Source 1](https://arxiv.org/abs/2512.13507) |
+| Cosmos3-Super | — | text | Unknown | Unknown | Pending confirmation |
+| SANA-WM | 4-step AR | camera | Unknown | Unknown | Pending confirmation |
+| DreamX-World | — | camera | No | No | [Source 1](https://github.com/AMAP-ML/DreamX-World) |
+| ABot-World | — | action | Yes | Unknown | [Source 1](https://github.com/amap-cvlab/ABot-World) |
+| Cosmos 2.5 | — | text | Unknown | Unknown | Pending confirmation |
+| Helios | Distilled | text | Yes | Unknown | [Source 1](https://github.com/PKU-YuanGroup/Helios) |
+| Cosmos3-Nano | — | text | Unknown | Unknown | Pending confirmation |
+| LTX 2.3 | — | text | Unknown | Yes | [Source 1](https://huggingface.co/Lightricks/LTX-2.3) |
+| InSpatio-World | — | camera | Unknown | Unknown | Pending confirmation |
+| Genie 3 | — | action | Yes | Unknown | [Source 1](https://deepmind.google/models/genie/) |
+| Fantasy-World | — | camera | Unknown | Unknown | Pending confirmation |
+| Astronex-World | 5B | camera | Unknown | Unknown | Pending confirmation |
+| YUME 1.5 | — | text | Unknown | Unknown | Pending confirmation |
+| LongCat-Video | — | text | Unknown | Unknown | Pending confirmation |
+| Infinite-World | — | action | Unknown | Unknown | Pending confirmation |
+| MatrixGame3 | — | action | Yes | Unknown | [Source 1](https://github.com/SkyworkAI/Matrix-Game/tree/main/Matrix-Game-3) |
+| Kairos 3.0 | — | text | Unknown | Unknown | Pending confirmation |
+| MatrixGame2 | — | action | Yes | Unknown | [Source 1](https://matrix-game-v2.github.io/) |
+| HY-GameCraft | — | action | Unknown | Unknown | Pending confirmation |
+| Astra | — | camera | Unknown | Unknown | Pending confirmation |
+| Murea-Pro | — | text | Unknown | Unknown | Pending confirmation |
+
+[Capability evidence and configuration notes](assets/model-capabilities.json). Corrections should identify the exact variant and link to an official model card, paper, or inference documentation.
+
+<!-- capabilities:end -->
+
 ## 🚀 Quick Start
 
 ```bash
