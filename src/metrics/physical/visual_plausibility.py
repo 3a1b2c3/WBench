@@ -126,26 +126,81 @@ class PhysicalPlausibilityEvaluator:
 
 
 def score_video_api(video_path: str, endpoint: str = None) -> Dict[str, Any]:
-    """Score a video via PAVRM HTTP API endpoint (fallback)."""
+    """Score a video via NVIDIA inference API endpoint."""
     import requests
+    import base64
 
-    endpoint = endpoint or os.environ.get("PAVRM_API_URL", "")
-    if not endpoint:
+    api_key = os.environ.get("NVIDIA_API_KEY", "")
+    if not api_key:
         return {"raw_score": None, "score": None,
-                "error": "PAVRM_API_URL not set. Set env var or pass endpoint."}
+                "error": "NVIDIA_API_KEY not set. Set env var for NVIDIA inference API."}
 
-    abs_path = os.path.abspath(video_path)
+    if not os.path.exists(video_path):
+        return {"raw_score": None, "score": None, "error": f"Video not found: {video_path}"}
+
+    endpoint = endpoint or "https://inference-api.nvidia.com/v1/chat/completions"
+
     try:
-        resp = requests.post(
-            endpoint,
-            json={"video_url": abs_path, "prompt": "", "dimension": "visual"},
-            timeout=120,
-        )
+        # Read video and encode as base64
+        with open(video_path, "rb") as f:
+            video_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        # Get video extension for media type
+        ext = os.path.splitext(video_path)[1].lower().lstrip(".")
+        media_type_map = {"mp4": "video/mp4", "webm": "video/webm", "mov": "video/quicktime"}
+        media_type = media_type_map.get(ext, "video/mp4")
+
+        # Call NVIDIA inference API with video
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": "nvidia/qwen/qwen3-vl-a3b",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{video_data}",
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": VIDEO_QUALITY_PROMPT,
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 10,
+        }
+
+        resp = requests.post(endpoint, json=payload, headers=headers, timeout=300)
+        resp.raise_for_status()
+
         data = resp.json()
-        if "detail" in data:
-            return {"raw_score": None, "score": None, "error": data["detail"]}
-        raw = float(data["score"])
-        return {"raw_score": round(raw, 4), "score": round(raw / 5.0, 4), "error": None}
+        if "error" in data:
+            return {"raw_score": None, "score": None, "error": data["error"]["message"]}
+
+        # Parse response for score
+        response_text = data["choices"][0]["message"]["content"].lower()
+        score_map = {"perfect": 5.0, "good": 4.0, "fair": 3.0, "poor": 2.0, "bad": 1.0}
+
+        raw_score = None
+        for word, score in score_map.items():
+            if word in response_text:
+                raw_score = score
+                break
+
+        if raw_score is None:
+            return {"raw_score": None, "score": None,
+                    "error": f"Could not parse score from response: {response_text}"}
+
+        return {"raw_score": round(raw_score, 4), "score": round(raw_score / 5.0, 4), "error": None}
     except Exception as e:
         return {"raw_score": None, "score": None, "error": str(e)}
 
